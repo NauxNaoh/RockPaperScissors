@@ -3,14 +3,14 @@ using System.Collections.Generic;
 using UnityEngine;
 
 namespace GameRPS
-{ 
+{
     public class RPSNetworkManager : NetworkManager
     {
         public static RPSNetworkManager Instance;
 
-        public uint PlayerCount;
+        public uint PlayerCount => (uint)NetworkServer.connections.Count;
 
-        private Dictionary<NetworkConnection, RPSPlayer> players = new();
+        private readonly Dictionary<NetworkConnection, RPSPlayer> players = new();
 
         public override void OnStartHost()
         {
@@ -23,6 +23,7 @@ namespace GameRPS
             base.OnStartServer();
             Instance = this;
             players.Clear();
+            Debug.Log("[Server] RPSNetworkManager started");
         }
 
         public override void OnServerAddPlayer(NetworkConnectionToClient conn)
@@ -30,21 +31,32 @@ namespace GameRPS
             base.OnServerAddPlayer(conn);
 
             RPSPlayer player = conn.identity.GetComponent<RPSPlayer>();
-            players[conn] = player;
-            player.ServerInitialize();
-            player.RpcNotifyPlayerJoined(conn.identity);
+            if (player != null)
+            {
+                players[conn] = player;
+                player.ServerInitialize();
+                player.RpcNotifyPlayerJoined(conn.identity.netId);
+            }
         }
 
         public override void OnServerDisconnect(NetworkConnectionToClient conn)
         {
             players.Remove(conn);
+            
             base.OnServerDisconnect(conn);
         }
 
 
-        public static void AddBattle(RPSBattle battle)
+        public RPSPlayer FindAnyOtherPlayer(RPSPlayer self)
         {
-
+            foreach (var kv in NetworkServer.spawned)
+            {
+                var player = kv.Value.GetComponent<RPSPlayer>();
+                if (player == null || player == self) continue;
+                if (player.state != RPSState.Idle) continue;
+                return player;
+            }
+            return null;
         }
     }
 }
