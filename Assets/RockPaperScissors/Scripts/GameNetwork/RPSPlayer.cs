@@ -1,4 +1,5 @@
 using Mirror;
+using Mirror.Examples.Common.Controllers.Player;
 using UnityEngine;
 
 namespace GameRPS
@@ -6,11 +7,15 @@ namespace GameRPS
     public enum RPSChoice : byte { None = 0, Rock = 1, Paper = 2, Scissors = 3 }
     public enum RPSState : byte { Idle = 0, WaitingConfirm = 1, Selecting = 2, Completed = 3 }
 
+    [RequireComponent(typeof(PlayerController))]
     public class RPSPlayer : NetworkBehaviour
     {
+        [Header("Prefabs")]
+        [SerializeField] private GameObject prefabCanvasJoystick;
         [Header("Reference")]
         [SerializeField] private TextMesh playerNameMesh;
         [SerializeField] private MeshRenderer playerMesh;
+        private PlayerController playerController;
 
 
         [SyncVar(hook = nameof(OnNameChanged))]
@@ -45,7 +50,9 @@ namespace GameRPS
 
         void OnNameChanged(string old, string newName)
         {
-            if (playerNameMesh != null) playerNameMesh.text = newName;
+            if (playerNameMesh == null) return;
+
+            playerNameMesh.text = isLocalPlayer ? $"You" : newName;
         }
 
         void OnColorChanged(Color old, Color newColor)
@@ -76,7 +83,7 @@ namespace GameRPS
 
 
 
-        #region Input
+        #region Input       
         private void Update()
         {
             if (!isLocalPlayer) return;
@@ -86,7 +93,6 @@ namespace GameRPS
                 CmdRequestFindOpponent();
                 return;
             }
-
 
             if (state == RPSState.WaitingConfirm && !isChallenger)
             {
@@ -283,5 +289,46 @@ namespace GameRPS
             Debug.Log($"Battle result: You lose!");
         }
         #endregion
+
+
+
+        #region Movement
+        [SerializeField] private Rigidbody rigidbody;
+
+        private void FixedUpdate()
+        {
+            if (!isLocalPlayer) return;
+            if (playerController == null) return;
+            if (!playerController.initialized) return;
+
+            var newPos = playerController.GetNewPos();
+            CmdChangePosition(newPos);
+        }
+
+        [Command]
+        void CmdChangePosition(Vector3 pos)
+        {
+#if UNITY_6000_0_OR_NEWER
+            rigidbody.linearVelocity = pos;
+#else
+            rigidbody.velocity = pos;
+#endif
+        }
+        #endregion
+
+        public override void OnStartLocalPlayer()
+        {
+            base.OnStartLocalPlayer();
+
+            var canvasObject = Instantiate(prefabCanvasJoystick);
+            var joy = canvasObject.GetComponentInChildren<FloatingJoystick>();
+            if (playerController == null)
+                playerController = GetComponent<PlayerController>();
+
+            if (joy == null) return;
+            playerController.Initialize(joy);
+        }
+
+
     }
 }
