@@ -1,4 +1,5 @@
 ﻿<Solution>
+  <Project Path="Assembly-CSharp.csproj" />
   <Project Path="Unity.Mirror.CodeGen.csproj" />
   <Project Path="Edgegap.csproj" />
   <Project Path="Mirror.Components.csproj" />
@@ -13,7 +14,6 @@
   <Project Path="EncryptionTransportEditor.csproj" />
   <Project Path="Telepathy.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
-  <Project Path="Assembly-CSharp.csproj" />
   <Project Path="Mirror.CompilerSymbols.csproj" />
   <Project Path="IngameDebugConsole.Editor.csproj" />
 </Solution>

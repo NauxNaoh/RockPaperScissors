@@ -1,23 +1,25 @@
 using Mirror;
-using Mirror.Examples.Common.Controllers.Player;
 using UnityEngine;
+using UnityEngine.InputSystem.LowLevel;
+using UnityEngine.InputSystem.XR;
 
 namespace GameRPS
 {
+    [System.Flags]
     public enum RPSChoice : byte { None = 0, Rock = 1, Paper = 2, Scissors = 3 }
     public enum RPSState : byte { Idle = 0, WaitingConfirm = 1, Selecting = 2, Completed = 3 }
 
-    [RequireComponent(typeof(PlayerController))]
+    [RequireComponent(typeof(RPSPlayerController))]
     public class RPSPlayer : NetworkBehaviour
     {
         [Header("Prefabs")]
-        [SerializeField] private GameObject prefabCanvasJoystick;
+        [SerializeField] private CanvasBattle prefabCanvasBattle;
+
         [Header("Reference")]
         [SerializeField] private TextMesh playerNameMesh;
         [SerializeField] private MeshRenderer playerMesh;
-        private PlayerController playerController;
 
-
+        [Header("Sync Variables")]
         [SyncVar(hook = nameof(OnNameChanged))]
         public string playerName;
 
@@ -35,6 +37,8 @@ namespace GameRPS
 
         [SyncVar]
         public bool isChallenger = false;
+
+
 
         #region Initialization
         [Server]
@@ -68,8 +72,9 @@ namespace GameRPS
         {
             if (!isLocalPlayer) return;
             Debug.Log($"[Client] Player {netId} (You) state changed: {newState}");
-        }
 
+            GetComponent<RPSPlayerController>().OnStateChanged(newState, canvasBattle?.state ?? CanvasState.None);
+        }
 
         [ClientRpc]
         public void RpcNotifyPlayerJoined(uint netID)
@@ -94,23 +99,23 @@ namespace GameRPS
                 return;
             }
 
-            if (state == RPSState.WaitingConfirm && !isChallenger)
-            {
-                if (Input.GetKeyDown(KeyCode.Y))
-                {
-                    CmdRespondToChallenge(true);
-                }
-                else if (Input.GetKeyDown(KeyCode.N))
-                {
-                    CmdRespondToChallenge(false);
-                }
-            }
-            else if (state == RPSState.Selecting)
-            {
-                if (Input.GetKeyDown(KeyCode.R)) CmdSelectChoice(RPSChoice.Rock);
-                else if (Input.GetKeyDown(KeyCode.P)) CmdSelectChoice(RPSChoice.Paper);
-                else if (Input.GetKeyDown(KeyCode.S)) CmdSelectChoice(RPSChoice.Scissors);
-            }
+            //if (state == RPSState.WaitingConfirm && !isChallenger)
+            //{
+            //    if (Input.GetKeyDown(KeyCode.Y))
+            //    {
+            //        CmdRespondToChallenge(true);
+            //    }
+            //    else if (Input.GetKeyDown(KeyCode.N))
+            //    {
+            //        CmdRespondToChallenge(false);
+            //    }
+            //}
+            //else if (state == RPSState.Selecting)
+            //{
+            //    if (Input.GetKeyDown(KeyCode.R)) CmdSelectChoice(RPSChoice.Rock);
+            //    else if (Input.GetKeyDown(KeyCode.P)) CmdSelectChoice(RPSChoice.Paper);
+            //    else if (Input.GetKeyDown(KeyCode.S)) CmdSelectChoice(RPSChoice.Scissors);
+            //}
         }
         #endregion
 
@@ -132,7 +137,6 @@ namespace GameRPS
             CreateChallengeWith(other);
         }
 
-
         [Server]
         public void CreateChallengeWith(RPSPlayer target)
         {
@@ -153,13 +157,19 @@ namespace GameRPS
         [TargetRpc]
         void TargetRpcNotifyFoundOpponent(NetworkConnectionToClient conn, uint oppId)
         {
-            Debug.Log($"You challenge Player {oppId}");
+            var mess = $"You challenge Player {oppId},\n wait opponent accept";
+            Debug.Log(mess);
+            canvasBattle?.SetDataChallenger(mess);
+            canvasBattle?.SetState(CanvasState.Challenger);
         }
 
         [TargetRpc]
         void TargetRpcReceiveChallenge(NetworkConnectionToClient conn, uint challengerNetId)
         {
-            Debug.Log($"[Client] You have challenge from Player {challengerNetId}. Press [Y]Confirm or [N]Reject");
+            var mess = $"You have challenge from Player {challengerNetId}";
+            Debug.Log(mess);
+            canvasBattle?.SetDataOpponent(mess, CmdRespondToChallenge);
+            canvasBattle?.SetState(CanvasState.Opponent);
         }
 
         [Command]
@@ -172,6 +182,7 @@ namespace GameRPS
             if (!challengerIdentity.TryGetComponent<RPSPlayer>(out var challenger))
             {
                 ResetBattleState();
+                //other disappear so not need reset UI
                 return;
             }
 
@@ -207,13 +218,20 @@ namespace GameRPS
         [TargetRpc]
         void TargetRpcBattleRejected(NetworkConnectionToClient conn)
         {
-            Debug.Log("[Client] Challenge rejected.");
+            Debug.Log("Challenge rejected.");
+            canvasBattle.SetState(CanvasState.None);
         }
 
         [TargetRpc]
         void TargetRpcStartSelection(NetworkConnectionToClient conn)
         {
-            Debug.Log($"[Client] Battle start. Press to choose [R]Rock, [P]Paper, [S]Scissors");
+            var mess = $"Battle start. Press to choose Rock, Paper, Scissors";
+            Debug.Log(mess);
+            canvasBattle.SetDataBattle(mess,
+                () => CmdSelectChoice(RPSChoice.Rock),
+                () => CmdSelectChoice(RPSChoice.Paper),
+                () => CmdSelectChoice(RPSChoice.Scissors));
+            canvasBattle.SetState(CanvasState.Battle);
         }
 
         [Command]
@@ -224,13 +242,20 @@ namespace GameRPS
             if (state != RPSState.Selecting) return;
             if (myChoice != RPSChoice.None) return;
             myChoice = choice;
+            TargetRpcShowWaiting(connectionToClient);
 
             if (opponentNetId == 0) return;
             if (!NetworkServer.spawned.TryGetValue(opponentNetId, out var opponentIdentity)) return;
             if (!opponentIdentity.TryGetComponent<RPSPlayer>(out var oppPlayer)) return;
             if (oppPlayer.myChoice == RPSChoice.None) return;
-
             CheckResult(this, oppPlayer);
+        }
+
+        [TargetRpc]
+        void TargetRpcShowWaiting(NetworkConnectionToClient conn)
+        {
+            canvasBattle.SetBattleWaitingOther($"You selected {myChoice}, waiting opponent");
+            canvasBattle.SetState(CanvasState.Battle);
         }
 
         [Server]
@@ -239,21 +264,8 @@ namespace GameRPS
             if (a.myChoice == RPSChoice.None || b.myChoice == RPSChoice.None) return;
 
             int result = CompareChoice(a.myChoice, b.myChoice);
-            switch (result)
-            {
-                case 0:
-                    a.TargetRpcShowDraw(a.connectionToClient);
-                    b.TargetRpcShowDraw(b.connectionToClient);
-                    break;
-                case 1:
-                    a.TargetRpcShowWin(a.connectionToClient);
-                    b.TargetRpcShowLose(b.connectionToClient);
-                    break;
-                case -1:
-                    a.TargetRpcShowLose(a.connectionToClient);
-                    b.TargetRpcShowWin(b.connectionToClient);
-                    break;
-            }
+            a.TargetRpcShowResult(a.connectionToClient, result, a.myChoice, b.myChoice);
+            b.TargetRpcShowResult(b.connectionToClient, result * -1, b.myChoice, a.myChoice);
 
             a.ResetBattleState();
             b.ResetBattleState();
@@ -270,65 +282,38 @@ namespace GameRPS
             return -1;
         }
 
-
         [TargetRpc]
-        void TargetRpcShowDraw(NetworkConnectionToClient conn)
+        void TargetRpcShowResult(NetworkConnectionToClient conn, int result, RPSChoice you, RPSChoice opp)
         {
-            Debug.Log($"Battle result: Draw!");
-        }
+            string mess = "";
+            if (result == 0)
+                mess = $"You [{you}] vs Opponent [{opp}] -> result: Draw!";
+            else if (result == 1)
+                mess = $"You [{you}] vs Opponent [{opp}] -> result: You WIN!";
+            else if (result == -1)
+                mess = $"You [{you}] vs Opponent [{opp}] -> result: You Lose!";
 
-        [TargetRpc]
-        void TargetRpcShowWin(NetworkConnectionToClient conn)
-        {
-            Debug.Log($"Battle result: You win!");
-        }
-
-        [TargetRpc]
-        void TargetRpcShowLose(NetworkConnectionToClient conn)
-        {
-            Debug.Log($"Battle result: You lose!");
+            Debug.Log(mess);
+            canvasBattle.SetDataEnd(mess, () => canvasBattle.SetState(CanvasState.None));
+            canvasBattle.SetState(CanvasState.End);
         }
         #endregion
 
 
-
-        #region Movement
-        [SerializeField] private Rigidbody rigidbody;
-
-        private void FixedUpdate()
-        {
-            if (!isLocalPlayer) return;
-            if (playerController == null) return;
-            if (!playerController.initialized) return;
-
-            var newPos = playerController.GetNewPos();
-            CmdChangePosition(newPos);
-        }
-
-        [Command]
-        void CmdChangePosition(Vector3 pos)
-        {
-#if UNITY_6000_0_OR_NEWER
-            rigidbody.linearVelocity = pos;
-#else
-            rigidbody.velocity = pos;
-#endif
-        }
-        #endregion
-
+        public CanvasBattle canvasBattle;
         public override void OnStartLocalPlayer()
         {
             base.OnStartLocalPlayer();
 
-            var canvasObject = Instantiate(prefabCanvasJoystick);
-            var joy = canvasObject.GetComponentInChildren<FloatingJoystick>();
-            if (playerController == null)
-                playerController = GetComponent<PlayerController>();
-
-            if (joy == null) return;
-            playerController.Initialize(joy);
+            var canvas = Instantiate<CanvasBattle>(prefabCanvasBattle);
+            if (canvas != null)
+            {
+                canvasBattle = canvas;
+                canvasBattle.onStateChanged += (s) =>
+                {
+                    GetComponent<RPSPlayerController>().OnStateChanged(state, s);
+                };
+            }
         }
-
-
     }
 }
