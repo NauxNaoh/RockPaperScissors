@@ -35,7 +35,6 @@ namespace GameRPS
             {
                 players[conn] = player;
                 player.ServerInitialize();
-                player.RpcNotifyPlayerJoined(conn.identity.netId);
             }
         }
 

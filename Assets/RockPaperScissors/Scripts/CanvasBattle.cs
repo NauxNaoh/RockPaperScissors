@@ -32,6 +32,10 @@ namespace GameRPS
         public TextMeshProUGUI tmpEnd;
         public Button btnOK;
 
+        [Header("challenge")]
+        public Button btnChallenge;
+        public TextMeshProUGUI tmpChallengeLabel;
+
         public CanvasState state = CanvasState.None;
         private Action<bool> actionAccept;
         private Action actionRock;
@@ -105,7 +109,6 @@ namespace GameRPS
             btnOK.onClick.AddListener(() => action?.Invoke());
         }
 
-
         private void Reset()
         {
             btnReject.onClick.RemoveAllListeners();
@@ -117,6 +120,24 @@ namespace GameRPS
             actionRock = null;
             actionPaper = null;
             actionScissors = null;
+        }
+
+        public void ShowChallengeButton(System.Action onClick, uint idPlayer)
+        {
+            tmpChallengeLabel.text = $"Challenge Player {idPlayer}";
+            btnChallenge.onClick.RemoveAllListeners();
+            btnChallenge.onClick.AddListener(() =>
+            {
+                HideChallengeButton();   // ?N NGAY L?P T?C
+                onClick();               // G?i command challenge player
+            });
+
+            btnChallenge.gameObject.SetActive(true);
+        }
+
+        public void HideChallengeButton()
+        {
+            btnChallenge.gameObject.SetActive(false);
         }
     }
 }
